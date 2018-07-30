@@ -1,5 +1,13 @@
 #include <pcap.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <netinet/if_ether.h>
+#include <netinet/ether.h>
+#include <netinet/ip.h>
+#include <netinet/tcp.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
 
 void usage() 
 {
@@ -7,106 +15,51 @@ void usage()
 	printf("sample: pcap_test wlan0\n");
 }
 
-int readBytes(char* packet, int* idx)
+void read_packet(uint8_t *packet, uint8_t len)
 {
-	int res;
-	res = packet[*idx];
-	(*idx)++;
+	struct ethhdr *ethhdr;
+	struct ether_addr *dest, *src;
+	struct iphdr *iphdr;
+	struct tcphdr *tcphdr;
+	uint8_t *data;
+	uint16_t iphdr_len;
+	uint32_t idx, sip, dip, data_size;
 
-	return (unsigned char)res;
-}
+	idx = 0;
 
-int readShorts(char* packet, int* idx)
-{
-	int res;
-	//TODO : IDX+1 OUT OF BOUND CHECK
-	res = readBytes(packet, idx) * 0x100 + readBytes(packet, idx);
-	
-	return res;
-}
-
-void skipBytes(int skip, int* idx)
-{
-	(*idx) += skip;
-}
-
-void scan_packet(char* packet, int* idx)
-{
-	int dst_mac[6], src_mac[6], packet_type, trans_type, src_ip[4], dst_ip[4], src_port, dst_port, i, skip;
-	(*idx) = 0;
-
-	// Destination MAC Addr
-	for ( i = 0; i < 6; i++ )
-		dst_mac[i] = readBytes(packet, idx);
-	// Source MAC Addr
-	for ( i = 0; i < 6; i++ )
-		src_mac[i] = readBytes(packet, idx);
-
-	// Packet Type : ipv4, arp
-	packet_type = readShorts(packet, idx);
-
-	// SKIP. FIXED VALUE
-	skipBytes(9, idx); // FIX
-
-	/* Filter IPv4 && TCP */
-	skip = 0;
-	switch( packet_type )
-	{
-		case 0x800: // ipv4
-			skip = 2;
-			break;
-		//case 0x806: // arp
-		//case 0x86dd: // ipv6
-		default:
-			return; // CHECK ONLY IPV4
-	}
-	trans_type = readBytes(packet, idx);
-	if ( trans_type != 0x6 ) // CEHCK ONLY TCP
+	// read frame header data
+	ethhdr = (struct ethhdr *)(packet+idx);
+	idx += sizeof(struct ethhdr);
+	if ( htons(ethhdr->h_proto) == ETH_P_ARP )
+		return;	
+	// read packet header data
+	iphdr = (struct iphdr *)(packet+idx);
+	idx += sizeof(struct iphdr);
+	if ( iphdr->protocol != IPPROTO_TCP )
 		return;
 
-	// SKIP.
-	skipBytes(skip, idx); // CHANGED BY packet_type.
+	dest = (struct ether_addr *)ethhdr->h_dest;
+	src  = (struct ether_addr *)ethhdr->h_source;
+	iphdr_len = iphdr->ihl*4; // size of ip header
+	// read segment header data
+ 	tcphdr = (struct tcphdr *)(packet+idx);
+	idx += sizeof(struct tcphdr);
+	// read data 
+	data_size = len - idx;
+	if ( data_size > 16 )
+		data_size = 16;
+	data = (uint8_t *)malloc( data_size );
+	data = (uint8_t *)(packet+idx);
 
-	// Source IP Addr
-	for ( i = 0; i < 4; i++ )
-		src_ip[i] = readBytes(packet, idx);
-	// Destination IP Addr
-	for ( i = 0; i < 4; i++ )
-		dst_ip[i] = readBytes(packet, idx);
-
-	// Source Port Addr
-	src_port = readShorts(packet, idx);
-	// Destination Port Addr
-	dst_port = readShorts(packet, idx);
-
-	/* print all */
-	printf("#########################\n");
-
-	printf("[*] dst_mac : %02x", dst_mac[0]);
-	for ( i = 1; i < 6; i++ )
-		printf(":%02x", dst_mac[i]);
-	printf("\n");
-
-	printf("[*] src_mac : %02x", src_mac[0]);
-	for ( i = 1; i < 6; i++ )
-		printf(":%02x", src_mac[i]);
-	printf("\n");
-
-	printf("[*] packet_type : 0x%x\n", packet_type);
-	printf("[*] trans_type : 0x%x\n", trans_type);
-
-	printf("[*] src_ip : %d", src_ip[0]);
-	for ( i = 1; i < 4; i++ )
-		printf(".%d", src_ip[i]);
-	printf("\n");
-
-	printf("[*] dst_ip : %d", dst_ip[0]);
-	for ( i = 1; i < 4; i++ )
-		printf(".%d", dst_ip[i]);
-	printf("\n");
-
-	printf("[*] src_port : %d\n", src_port);
-	printf("[*] dst_port : %d\n", dst_port);
+	printf("[+] Captured IP Packet\n");
+	printf("DEST MAC : %s\n", ether_ntoa(dest));
+	printf("SRC  MAC : %s\n", ether_ntoa(src));
+	printf("SRC   IP : %s\n", inet_ntoa(*(struct in_addr *)&iphdr->saddr));
+	printf("DEST  IP : %s\n", inet_ntoa(*(struct in_addr *)&iphdr->daddr));
+	printf("------DATA------\n");
+	for ( int i = 0; i < data_size; i++ )
+		printf("%02x ", data[i]);
+	printf("\n\n");
 }
 
 int main(int argc, char* argv[]) 
@@ -131,7 +84,7 @@ int main(int argc, char* argv[])
 		int res = pcap_next_ex(handle, &header, &packet);
 		if (res == 0) continue;
 		if (res == -1 || res == -2) break;
-		scan_packet((char *)packet, &idx);
+		read_packet((uint8_t *)packet, (uint8_t)header->caplen);
 	}
 
 	pcap_close(handle);
