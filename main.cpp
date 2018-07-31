@@ -30,7 +30,7 @@ void read_packet(uint8_t *packet, uint8_t len)
 	// read frame header data
 	ethhdr = (struct ethhdr *)(packet+idx);
 	idx += sizeof(struct ethhdr);
-	if ( htons(ethhdr->h_proto) == ETH_P_ARP )
+	if ( htons(ethhdr->h_proto) != ETH_P_IP )
 		return;	
 	// read packet header data
 	iphdr = (struct iphdr *)(packet+idx);
@@ -52,10 +52,12 @@ void read_packet(uint8_t *packet, uint8_t len)
 	data = (uint8_t *)(packet+idx);
 
 	printf("[+] Captured IP Packet\n");
-	printf("DEST MAC : %s\n", ether_ntoa(dest));
-	printf("SRC  MAC : %s\n", ether_ntoa(src));
-	printf("SRC   IP : %s\n", inet_ntoa(*(struct in_addr *)&iphdr->saddr));
-	printf("DEST  IP : %s\n", inet_ntoa(*(struct in_addr *)&iphdr->daddr));
+	printf("DEST  MAC : %s\n", ether_ntoa(dest));
+	printf("SRC   MAC : %s\n", ether_ntoa(src));
+	printf("SRC    IP : %s\n", inet_ntoa(*(struct in_addr *)&iphdr->saddr));
+	printf("DEST   IP : %s\n", inet_ntoa(*(struct in_addr *)&iphdr->daddr));
+	printf("SRC  PORT : %d\n", (uint16_t)htons(tcphdr->th_sport));
+	printf("DEST PORT : %d\n", (uint16_t)htons(tcphdr->th_dport));
 	printf("------DATA------\n");
 	for ( int i = 0; i < data_size; i++ )
 		printf("%02x ", data[i]);
